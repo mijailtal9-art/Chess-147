@@ -1,1 +1,401 @@
+cat > ~/ajedrez.html << 'FIN'
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ajedrez</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 10px;
+    background: #1a1a1a; color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100vh; user-select: none;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 10px; }
+  #status {
+    font-size: 1.1rem; font-weight: bold;
+    margin-bottom: 10px; padding: 8px 16px;
+    background: #2a2a2a; border-radius: 8px;
+    min-height: 20px; text-align: center;
+  }
+  #status.check { background: #c62828; }
+  #status.mate { background: #2e7d32; }
 
+  #board {
+    display: grid;
+    grid-template-columns: repeat(8, 12.5%);
+    grid-template-rows: repeat(8, 12.5%);
+    width: min(95vw, 480px);
+    height: min(95vw, 480px);
+    border: 4px solid #444;
+    border-radius: 6px;
+    overflow: hidden;
+    box-sizing: content-box;
+  }
+
+  .sq {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: min(7vw, 40px);
+    font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', 'Noto Sans Symbols', 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
+    line-height: 1;
+    cursor: pointer;
+    position: relative;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .light { background: #f0d9b5; }
+  .dark  { background: #b58863; }
+
+  .sq.sel {
+    outline: 4px solid #ffeb3b;
+    outline-offset: -4px;
+  }
+  .sq.valid::after {
+    content: ''; position: absolute;
+    width: 30%; height: 30%; border-radius: 50%;
+    background: rgba(0, 150, 0, 0.55);
+    pointer-events: none;
+  }
+  .sq.capture::after {
+    width: 80%; height: 80%; border-radius: 50%;
+    background: transparent;
+    box-shadow: inset 0 0 0 5px rgba(200, 0, 0, 0.65);
+    pointer-events: none;
+  }
+  .sq.last {
+    outline: 4px solid #2196f3;
+    outline-offset: -4px;
+  }
+  .sq.check {
+    background: #e57373 !important;
+  }
+
+  .w-piece { color: #fff; text-shadow: 0 0 1px #000, 1px 1px 0 #666; }
+  .b-piece { color: #111; text-shadow: 0 0 1px #fff; }
+
+  #controls {
+    display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    padding: 10px 16px; border: none; border-radius: 8px;
+    background: #1976d2; color: white; font-weight: bold;
+    font-size: 0.95rem; cursor: pointer;
+  }
+  button:active { background: #0d47a1; }
+  #info {
+    margin-top: 10px; font-size: 0.85rem;
+    color: #aaa; text-align: center; max-width: 480px;
+  }
+</style>
+</head>
+<body>
+<h1>♞ Ajedrez</h1>
+<div id="status">Turno: Blancas</div>
+<div id="board"></div>
+<div id="controls">
+  <button id="btnNew">Nueva partida</button>
+  <button id="btnUndo">Deshacer</button>
+  <button id="btnFlip">Girar tablero</button>
+</div>
+<div id="info">Tocá una pieza y después una casilla válida.</div>
+
+<script>
+const START = [
+  ['r','n','b','q','k','b','n','r'],
+  ['p','p','p','p','p','p','p','p'],
+  ['','','','','','','',''],
+  ['','','','','','','',''],
+  ['','','','','','','',''],
+  ['','','','','','','',''],
+  ['P','P','P','P','P','P','P','P'],
+  ['R','N','B','Q','K','B','N','R']
+];
+
+const SYMBOLS = {
+  'k':'♚','q':'♛','r':'♜','b':'♝','n':'♞','p':'♟',
+  'K':'♔','Q':'♕','R':'♖','B':'♗','N':'♘','P':'♙'
+};
+
+let board = [];
+let turn = 'w';
+let selected = null;
+let validMoves = [];
+let lastMove = null;
+let flipped = false;
+let history = [];
+let gameOver = false;
+
+function init() {
+  board = START.map(row => row.slice());
+  turn = 'w';
+  selected = null;
+  validMoves = [];
+  lastMove = null;
+  gameOver = false;
+  history = [];
+  render();
+  updateStatus();
+}
+
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+
+function render() {
+  boardEl.innerHTML = '';
+  const rows = flipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+  const cols = flipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+
+  for (const r of rows) {
+    for (const c of cols) {
+      const sq = document.createElement('div');
+      sq.className = 'sq ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
+
+      const piece = board[r][c];
+      if (piece) {
+        const span = document.createElement('span');
+        span.textContent = SYMBOLS[piece];
+        span.className = (piece === piece.toUpperCase()) ? 'w-piece' : 'b-piece';
+        sq.appendChild(span);
+      }
+
+      if (selected && selected.r === r && selected.c === c) sq.classList.add('sel');
+      if (validMoves.some(m => m.r === r && m.c === c)) {
+        sq.classList.add('valid');
+        if (piece) sq.classList.add('capture');
+      }
+      if (lastMove && ((lastMove.from.r===r && lastMove.from.c===c) ||
+                       (lastMove.to.r===r && lastMove.to.c===c))) {
+        sq.classList.add('last');
+      }
+      const kingPos = findKing(turn);
+      if (kingPos && kingPos.r === r && kingPos.c === c && isInCheck(turn)) {
+        sq.classList.add('check');
+      }
+
+      sq.addEventListener('click', () => onSquareClick(r, c));
+      boardEl.appendChild(sq);
+    }
+  }
+}
+
+function updateStatus(extra) {
+  statusEl.classList.remove('check','mate');
+  if (gameOver) {
+    statusEl.classList.add('mate');
+    statusEl.textContent = extra || 'Fin de la partida';
+    return;
+  }
+  const color = turn === 'w' ? 'Blancas' : 'Negras';
+  if (isInCheck(turn)) {
+    statusEl.classList.add('check');
+    statusEl.textContent = `¡Jaque a las ${color}!`;
+  } else {
+    statusEl.textContent = `Turno: ${color}`;
+  }
+}
+
+function inside(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+function isWhite(p) { return p && p === p.toUpperCase(); }
+function isBlack(p) { return p && p === p.toLowerCase(); }
+function colorOf(p) { return isWhite(p) ? 'w' : (isBlack(p) ? 'b' : null); }
+
+function pseudoMoves(r, c) {
+  const p = board[r][c];
+  if (!p) return [];
+  const moves = [];
+  const add = (rr, cc) => {
+    if (!inside(rr, cc)) return;
+    const t = board[rr][cc];
+    if (!t) { moves.push({r:rr,c:cc}); return; }
+    if (colorOf(t) !== colorOf(p)) moves.push({r:rr,c:cc,capture:true});
+  };
+  const slide = (dirs) => {
+    for (const [dr,dc] of dirs) {
+      let rr = r+dr, cc = c+dc;
+      while (inside(rr,cc)) {
+        const t = board[rr][cc];
+        if (!t) { moves.push({r:rr,c:cc}); }
+        else {
+          if (colorOf(t) !== colorOf(p)) moves.push({r:rr,c:cc,capture:true});
+          break;
+        }
+        rr+=dr; cc+=dc;
+      }
+    }
+  };
+
+  const lower = p.toLowerCase();
+  const white = isWhite(p);
+
+  if (lower === 'p') {
+    const dir = white ? -1 : 1;
+    const startRow = white ? 6 : 1;
+    if (inside(r+dir,c) && !board[r+dir][c]) {
+      moves.push({r:r+dir,c:c});
+      if (r === startRow && !board[r+2*dir][c]) moves.push({r:r+2*dir,c:c});
+    }
+    for (const dc of [-1,1]) {
+      const rr=r+dir, cc=c+dc;
+      if (inside(rr,cc) && board[rr][cc] && colorOf(board[rr][cc]) !== colorOf(p)) {
+        moves.push({r:rr,c:cc,capture:true});
+      }
+    }
+  }
+  else if (lower === 'n') {
+    for (const [dr,dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) {
+      add(r+dr, c+dc);
+    }
+  }
+  else if (lower === 'b') slide([[-1,-1],[-1,1],[1,-1],[1,1]]);
+  else if (lower === 'r') slide([[-1,0],[1,0],[0,-1],[0,1]]);
+  else if (lower === 'q') slide([[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]);
+  else if (lower === 'k') {
+    for (const [dr,dc] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]) {
+      add(r+dr, c+dc);
+    }
+  }
+  return moves;
+}
+
+function findKing(color) {
+  const target = color === 'w' ? 'K' : 'k';
+  for (let r=0;r<8;r++) for (let c=0;c<8;c++)
+    if (board[r][c] === target) return {r,c};
+  return null;
+}
+
+function isInCheck(color) {
+  const k = findKing(color);
+  if (!k) return false;
+  const enemy = color === 'w' ? 'b' : 'w';
+  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+    if (colorOf(board[r][c]) === enemy) {
+      const ms = pseudoMoves(r,c);
+      if (ms.some(m => m.r === k.r && m.c === k.c)) return true;
+    }
+  }
+  return false;
+}
+
+function legalMoves(r, c) {
+  const p = board[r][c];
+  if (!p) return [];
+  const raw = pseudoMoves(r, c);
+  const out = [];
+  for (const m of raw) {
+    const cap = board[m.r][m.c];
+    board[m.r][m.c] = p;
+    board[r][c] = '';
+    const bad = isInCheck(colorOf(p));
+    board[r][c] = p;
+    board[m.r][m.c] = cap;
+    if (!bad) out.push(m);
+  }
+  return out;
+}
+
+function hasAnyLegalMove(color) {
+  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+    if (colorOf(board[r][c]) === color) {
+      if (legalMoves(r,c).length) return true;
+    }
+  }
+  return false;
+}
+
+function onSquareClick(r, c) {
+  if (gameOver) return;
+
+  if (selected) {
+    const move = validMoves.find(m => m.r === r && m.c === c);
+    if (move) {
+      makeMove(selected.r, selected.c, r, c);
+      return;
+    }
+  }
+
+  const p = board[r][c];
+  if (p && colorOf(p) === turn) {
+    selected = {r, c};
+    validMoves = legalMoves(r, c);
+    render();
+    return;
+  }
+
+  selected = null;
+  validMoves = [];
+  render();
+}
+
+function makeMove(r1, c1, r2, c2) {
+  history.push({
+    board: board.map(row => row.slice()),
+    turn, lastMove
+  });
+
+  const piece = board[r1][c1];
+  board[r2][c2] = piece;
+  board[r1][c1] = '';
+
+  if (piece === 'P' && r2 === 0) board[r2][c2] = 'Q';
+  if (piece === 'p' && r2 === 7) board[r2][c2] = 'q';
+
+  lastMove = { from: {r:r1,c:c1}, to: {r:r2,c:c2} };
+  selected = null;
+  validMoves = [];
+  turn = turn === 'w' ? 'b' : 'w';
+
+  const inCheck = isInCheck(turn);
+  const anyMove = hasAnyLegalMove(turn);
+  if (!anyMove) {
+    gameOver = true;
+    if (inCheck) {
+      const ganador = turn === 'w' ? 'Negras' : 'Blancas';
+      render();
+      updateStatus(`¡Jaque mate! Ganan las ${ganador}`);
+      return;
+    } else {
+      render();
+      updateStatus('¡Tablas por ahogado!');
+      return;
+    }
+  }
+
+  render();
+  updateStatus();
+}
+
+document.getElementById('btnNew').addEventListener('click', () => { init(); });
+document.getElementById('btnUndo').addEventListener('click', () => {
+  if (!history.length) return;
+  const st = history.pop();
+  board = st.board;
+  turn = st.turn;
+  lastMove = st.lastMove;
+  selected = null;
+  validMoves = [];
+  gameOver = false;
+  render();
+  updateStatus();
+});
+document.getElementById('btnFlip').addEventListener('click', () => {
+  flipped = !flipped;
+  render();
+});
+
+init();
+</script>
+</body>
+</html>
+FIN
