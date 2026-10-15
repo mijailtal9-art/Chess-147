@@ -1,4 +1,3 @@
-cat > ~/ajedrez.html << 'FIN'
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -135,6 +134,7 @@ let lastMove = null;
 let flipped = false;
 let history = [];
 let gameOver = false;
+let moved = {};
 
 function init() {
   board = START.map(row => row.slice());
@@ -144,6 +144,7 @@ function init() {
   lastMove = null;
   gameOver = false;
   history = [];
+  moved = { wK:false, wRq:false, wRk:false, bK:false, bRq:false, bRk:false };
   render();
   updateStatus();
 }
@@ -210,6 +211,45 @@ function isWhite(p) { return p && p === p.toUpperCase(); }
 function isBlack(p) { return p && p === p.toLowerCase(); }
 function colorOf(p) { return isWhite(p) ? 'w' : (isBlack(p) ? 'b' : null); }
 
+function pieceAttacks(fr, fc, tr, tc) {
+  const p = board[fr][fc];
+  if (!p) return false;
+  const lower = p.toLowerCase();
+  const dr = tr - fr, dc = tc - fc;
+  const adr = Math.abs(dr), adc = Math.abs(dc);
+
+  if (lower === 'p') {
+    const dir = isWhite(p) ? -1 : 1;
+    return dr === dir && adc === 1;
+  }
+  if (lower === 'n') return (adr === 2 && adc === 1) || (adr === 1 && adc === 2);
+  if (lower === 'k') return adr <= 1 && adc <= 1 && (adr + adc > 0);
+  if (lower === 'b') return adr === adc && pathClear(fr, fc, tr, tc);
+  if (lower === 'r') return (dr === 0 || dc === 0) && pathClear(fr, fc, tr, tc);
+  if (lower === 'q') return (adr === adc || dr === 0 || dc === 0) && pathClear(fr, fc, tr, tc);
+  return false;
+}
+
+function pathClear(fr, fc, tr, tc) {
+  const dr = Math.sign(tr - fr), dc = Math.sign(tc - fc);
+  let r = fr + dr, c = fc + dc;
+  while (r !== tr || c !== tc) {
+    if (board[r][c]) return false;
+    r += dr; c += dc;
+  }
+  return true;
+}
+
+function isSquareAttacked(r, c, color) {
+  const enemy = color === 'w' ? 'b' : 'w';
+  for (let rr=0;rr<8;rr++) for (let cc=0;cc<8;cc++) {
+    const p = board[rr][cc];
+    if (!p || colorOf(p) !== enemy) continue;
+    if (pieceAttacks(rr, cc, r, c)) return true;
+  }
+  return false;
+}
+
 function pseudoMoves(r, c) {
   const p = board[r][c];
   if (!p) return [];
@@ -225,7 +265,7 @@ function pseudoMoves(r, c) {
       let rr = r+dr, cc = c+dc;
       while (inside(rr,cc)) {
         const t = board[rr][cc];
-        if (!t) { moves.push({r:rr,c:cc}); }
+        if (!t) moves.push({r:rr,c:cc});
         else {
           if (colorOf(t) !== colorOf(p)) moves.push({r:rr,c:cc,capture:true});
           break;
@@ -237,6 +277,7 @@ function pseudoMoves(r, c) {
 
   const lower = p.toLowerCase();
   const white = isWhite(p);
+  const color = colorOf(p);
 
   if (lower === 'p') {
     const dir = white ? -1 : 1;
@@ -247,7 +288,7 @@ function pseudoMoves(r, c) {
     }
     for (const dc of [-1,1]) {
       const rr=r+dir, cc=c+dc;
-      if (inside(rr,cc) && board[rr][cc] && colorOf(board[rr][cc]) !== colorOf(p)) {
+      if (inside(rr,cc) && board[rr][cc] && colorOf(board[rr][cc]) !== color) {
         moves.push({r:rr,c:cc,capture:true});
       }
     }
@@ -264,6 +305,22 @@ function pseudoMoves(r, c) {
     for (const [dr,dc] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]) {
       add(r+dr, c+dc);
     }
+    // ENROQUE
+    const homeRow = white ? 7 : 0;
+    if (r === homeRow && c === 4 && !isInCheck(color)) {
+      if (!moved[color+'K'] && !moved[color+'Rk'] &&
+          !board[homeRow][5] && !board[homeRow][6] &&
+          !isSquareAttacked(homeRow, 5, color) &&
+          !isSquareAttacked(homeRow, 6, color)) {
+        moves.push({r: homeRow, c: 6, castle: 'k'});
+      }
+      if (!moved[color+'K'] && !moved[color+'Rq'] &&
+          !board[homeRow][1] && !board[homeRow][2] && !board[homeRow][3] &&
+          !isSquareAttacked(homeRow, 3, color) &&
+          !isSquareAttacked(homeRow, 2, color)) {
+        moves.push({r: homeRow, c: 2, castle: 'q'});
+      }
+    }
   }
   return moves;
 }
@@ -278,14 +335,7 @@ function findKing(color) {
 function isInCheck(color) {
   const k = findKing(color);
   if (!k) return false;
-  const enemy = color === 'w' ? 'b' : 'w';
-  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
-    if (colorOf(board[r][c]) === enemy) {
-      const ms = pseudoMoves(r,c);
-      if (ms.some(m => m.r === k.r && m.c === k.c)) return true;
-    }
-  }
-  return false;
+  return isSquareAttacked(k.r, k.c, color);
 }
 
 function legalMoves(r, c) {
@@ -316,15 +366,10 @@ function hasAnyLegalMove(color) {
 
 function onSquareClick(r, c) {
   if (gameOver) return;
-
   if (selected) {
     const move = validMoves.find(m => m.r === r && m.c === c);
-    if (move) {
-      makeMove(selected.r, selected.c, r, c);
-      return;
-    }
+    if (move) { makeMove(selected.r, selected.c, r, c, move); return; }
   }
-
   const p = board[r][c];
   if (p && colorOf(p) === turn) {
     selected = {r, c};
@@ -332,24 +377,44 @@ function onSquareClick(r, c) {
     render();
     return;
   }
-
   selected = null;
   validMoves = [];
   render();
 }
 
-function makeMove(r1, c1, r2, c2) {
+function makeMove(r1, c1, r2, c2, move) {
   history.push({
     board: board.map(row => row.slice()),
-    turn, lastMove
+    turn, lastMove, moved: Object.assign({}, moved)
   });
 
   const piece = board[r1][c1];
   board[r2][c2] = piece;
   board[r1][c1] = '';
 
+  // Enroque: mover también la torre
+  if (move && move.castle) {
+    const row = r1;
+    if (move.castle === 'k') {
+      board[row][5] = board[row][7];
+      board[row][7] = '';
+    } else {
+      board[row][3] = board[row][0];
+      board[row][0] = '';
+    }
+  }
+
+  // Promoción
   if (piece === 'P' && r2 === 0) board[r2][c2] = 'Q';
   if (piece === 'p' && r2 === 7) board[r2][c2] = 'q';
+
+  // Marcar piezas movidas (para el enroque)
+  const color = colorOf(piece);
+  if (piece.toLowerCase() === 'k') moved[color+'K'] = true;
+  if (piece === 'R' && c1 === 0) moved.wRq = true;
+  if (piece === 'R' && c1 === 7) moved.wRk = true;
+  if (piece === 'r' && c1 === 0) moved.bRq = true;
+  if (piece === 'r' && c1 === 7) moved.bRk = true;
 
   lastMove = { from: {r:r1,c:c1}, to: {r:r2,c:c2} };
   selected = null;
@@ -383,6 +448,7 @@ document.getElementById('btnUndo').addEventListener('click', () => {
   board = st.board;
   turn = st.turn;
   lastMove = st.lastMove;
+  moved = st.moved;
   selected = null;
   validMoves = [];
   gameOver = false;
@@ -397,5 +463,4 @@ document.getElementById('btnFlip').addEventListener('click', () => {
 init();
 </script>
 </body>
-</html>
-FIN
+ </html>
