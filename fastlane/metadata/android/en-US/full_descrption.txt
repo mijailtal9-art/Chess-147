@@ -1,0 +1,10 @@
+A simple, offline chess game built with HTML/CSS/JS.
+
+Features:
+- Complete piece movement
+- Short and long castling
+- Pawn promotion
+- Check, checkmate and stalemate detection
+- 100% offline
+- No ads, no trackers, no unnecessary permissions
+- Minimalist touch interface
