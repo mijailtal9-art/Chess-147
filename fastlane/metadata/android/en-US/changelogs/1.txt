@@ -1,0 +1,7 @@
+Initial release.
+
+- Full chess rules
+- Short and long castling
+- Pawn promotion
+- Check, checkmate and stalemate detection
+- 100% offline
