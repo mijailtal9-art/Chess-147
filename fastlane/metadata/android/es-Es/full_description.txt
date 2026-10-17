@@ -1,0 +1,10 @@
+Un juego de ajedrez simple y offline hecho con HTML/CSS/JS.
+
+Características:
+- Movimiento completo de todas las piezas
+- Enroque corto y largo
+- Promoción de peón
+- Detección de jaque, jaque mate y tablas
+- 100% offline
+- Sin publicidad, sin rastreadores, sin permisos innecesarios
+- Interfaz táctil minimalista
